@@ -1,0 +1,5 @@
+fastapi>=0.111
+yfinance>=0.2
+pandas>=2.2
+apscheduler>=3.10
+pydantic>=2.7
