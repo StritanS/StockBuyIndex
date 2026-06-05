@@ -10,7 +10,9 @@
       "entrypoint": "api/index.py",
       "routePrefix": "/api",
       "framework": "fastapi",
-      "excludeFiles": "{backend/tests/**,frontend/**,**/__pycache__/**,**/*.pyc,.pytest_cache/**}"
+      "excludeFiles": "{backend/tests/**,frontend/**,**/__pycache__/**,**/*.pyc,.pytest_cache/**}",
+      "memory": 1024,
+      "maxDuration": 60
     }
   }
 }

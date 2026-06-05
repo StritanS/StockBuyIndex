@@ -76,6 +76,7 @@ This repo is now Vercel-compatible as a single project:
 
 - `frontend/` is built as a Vite static app.
 - `api/index.py` exposes the FastAPI `app` as a Vercel Python Function.
+- Lightweight routes avoid importing yfinance until market data is actually requested, which makes `/api/health` safer for Vercel cold starts.
 - `vercel.json` builds `frontend/dist`, rewrites `/api/*` to the Python function, and falls back all other paths to the SPA `index.html`.
 
 ### Vercel setup from GitHub
@@ -91,11 +92,11 @@ This repo is now Vercel-compatible as a single project:
    - `VITE_API_BASE` should be empty or omitted in production so browser calls use same-origin `/api`.
    - `CORS_ORIGINS` can be omitted for same-origin calls, or set to your custom domain for external API callers.
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `EMAIL_FROM` are only needed if you send real email alerts.
-7. Deploy. The frontend will be served from Vercel's CDN and API calls such as `/api/health` will run through the FastAPI service.
+7. Deploy. The frontend will be served from Vercel's CDN and API calls such as `/api/health` will run through the FastAPI service. If Vercel shows `FUNCTION_INVOCATION_FAILED`, open the deployment logs for the backend service first; the app now keeps `/api/health` independent of yfinance so that import/cold-start issues are easier to diagnose.
 
 ### Important Vercel storage note
 
-The MVP still uses SQLite. On Vercel, SQLite is created under `/tmp` so the function can write to it, but this storage is ephemeral and can reset between deployments or cold starts. That is fine for a demo deployment, but production watchlists, score history, macro context, and notification rules should be moved to durable storage such as Vercel Postgres, Neon, Supabase, Turso/libSQL, or another managed database.
+The MVP still uses SQLite. On Vercel, SQLite is created under `/tmp` so the function can write to it, but this storage is ephemeral and can reset between deployments or cold starts. The watchlist table is seeded on import/startup so read-only routes can recover after a cold start. That is fine for a demo deployment, but production watchlists, score history, macro context, and notification rules should be moved to durable storage such as Vercel Postgres, Neon, Supabase, Turso/libSQL, or another managed database.
 
 ### Local Vercel-style development
 

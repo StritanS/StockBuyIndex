@@ -8,13 +8,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from app.backtesting.backtest import run_monthly_score_backtest
-from app.data_providers.yfinance_provider import YFinanceProvider
 from app.notifications.email_service import AlertRule, should_notify
 from app.scoring.opportunity_score import DISCLAIMER, calculate_opportunity_score
 
@@ -31,8 +30,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-provider = YFinanceProvider()
-scheduler = BackgroundScheduler()
+provider = None
+scheduler = None
+
+
+def get_provider():
+    """Lazily import yfinance dependencies so lightweight routes stay reliable on Vercel."""
+    global provider
+    if provider is None:
+        from app.data_providers.yfinance_provider import YFinanceProvider
+
+        provider = YFinanceProvider()
+    return provider
 
 
 class WatchlistRequest(BaseModel):
@@ -112,7 +121,7 @@ def save_score(ticker: str, score_payload: dict[str, Any]) -> None:
 
 
 def build_ticker_payload(ticker: str) -> dict[str, Any]:
-    snapshot = provider.get_ticker_snapshot(ticker)
+    snapshot = get_provider().get_ticker_snapshot(ticker)
     score_payload = calculate_opportunity_score(snapshot.metrics, get_macro_context())
     payload = {
         "ticker": snapshot.ticker,
@@ -139,14 +148,21 @@ def refresh_watchlist_scores() -> None:
 def startup() -> None:
     init_db()
     if not IS_VERCEL:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        global scheduler
+        scheduler = BackgroundScheduler()
         scheduler.add_job(refresh_watchlist_scores, "interval", hours=24, id="daily-score-refresh", replace_existing=True)
         scheduler.start()
 
 
 @app.on_event("shutdown")
 def shutdown() -> None:
-    if scheduler.running:
+    if scheduler and scheduler.running:
         scheduler.shutdown(wait=False)
+
+
+init_db()
 
 
 @app.get("/api/health")
@@ -185,17 +201,34 @@ def ticker_detail(ticker: str) -> dict[str, Any]:
 
 
 @app.get("/api/scores")
-def scores() -> dict[str, Any]:
+def scores(refresh: bool = Query(default=False, description="Fetch fresh yfinance data for the full watchlist.")) -> dict[str, Any]:
     with db() as conn:
         tickers = [row["ticker"] for row in conn.execute("SELECT ticker FROM watchlist ORDER BY ticker")]
+        latest_rows = {
+            row["ticker"]: row
+            for row in conn.execute(
+                """SELECT sh.ticker, sh.score, sh.payload
+                   FROM score_history sh
+                   JOIN (SELECT ticker, MAX(as_of) AS as_of FROM score_history GROUP BY ticker) latest
+                     ON latest.ticker = sh.ticker AND latest.as_of = sh.as_of"""
+            )
+        }
     items = []
     for ticker in tickers:
-        try:
-            item = build_ticker_payload(ticker)
-            items.append({"ticker": ticker, "metrics": item["metrics"], "score": item["score"]})
-        except Exception as exc:
-            items.append({"ticker": ticker, "error": str(exc)})
-    return {"items": items, "disclaimer": DISCLAIMER}
+        if refresh:
+            try:
+                item = build_ticker_payload(ticker)
+                items.append({"ticker": ticker, "metrics": item["metrics"], "score": item["score"]})
+            except Exception as exc:
+                items.append({"ticker": ticker, "error": str(exc)})
+            continue
+        latest = latest_rows.get(ticker)
+        if latest:
+            payload = json.loads(latest["payload"])
+            items.append({"ticker": ticker, "score": payload})
+        else:
+            items.append({"ticker": ticker, "score": None, "metrics": None})
+    return {"items": items, "disclaimer": DISCLAIMER, "refreshed": refresh}
 
 
 @app.post("/api/macro")
@@ -235,7 +268,7 @@ def evaluate_notification(rule: NotificationRuleRequest, current_score: float, p
 
 @app.post("/api/backtest")
 def backtest(request: BacktestRequest) -> dict[str, Any]:
-    snapshot = provider.get_ticker_snapshot(request.ticker, period="10y")
+    snapshot = get_provider().get_ticker_snapshot(request.ticker, period="10y")
     import yfinance as yf
 
     history = yf.Ticker(request.ticker.upper()).history(period="10y", auto_adjust=True)
@@ -243,3 +276,34 @@ def backtest(request: BacktestRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="No history for backtest")
     result = run_monthly_score_backtest(history, request.threshold, request.monthly_amount)
     return {"ticker": snapshot.ticker, "result": result.__dict__, "disclaimer": DISCLAIMER}
+
+
+def _register_service_route_aliases() -> None:
+    """Support both /api/* and stripped-prefix paths used by Vercel Services."""
+    existing_paths = {route.path for route in app.routes}
+    for route in list(app.routes):
+        if not isinstance(route, APIRoute) or not route.path.startswith("/api/"):
+            continue
+        alias = route.path.removeprefix("/api")
+        if alias in existing_paths:
+            continue
+        app.add_api_route(
+            alias,
+            route.endpoint,
+            methods=list(route.methods or []),
+            response_model=route.response_model,
+            status_code=route.status_code,
+            tags=route.tags,
+            dependencies=route.dependencies,
+            summary=route.summary,
+            description=route.description,
+            response_description=route.response_description,
+            responses=route.responses,
+            deprecated=route.deprecated,
+            operation_id=f"{route.operation_id}_service_alias" if route.operation_id else None,
+            include_in_schema=False,
+        )
+        existing_paths.add(alias)
+
+
+_register_service_route_aliases()
