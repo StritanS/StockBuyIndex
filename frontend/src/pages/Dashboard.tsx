@@ -70,19 +70,34 @@ export default function Dashboard() {
 
   async function addTicker() {
     if (!newTicker.trim()) return;
-    await apiPost('/api/watchlist', { ticker: newTicker.trim().toUpperCase() });
-    setNewTicker('');
-    await refreshScores();
+    setError(null);
+    try {
+      await apiPost('/api/watchlist', { ticker: newTicker.trim().toUpperCase() });
+      setNewTicker('');
+      await refreshScores();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to add ticker');
+    }
   }
 
   async function saveNotification() {
-    await apiPost('/api/notifications', { ticker: selected, email, threshold, increase_points: 15, lookback_days: 30 });
-    setEmail('');
+    setError(null);
+    try {
+      await apiPost('/api/notifications', { ticker: selected, email, threshold, increase_points: 15, lookback_days: 30 });
+      setEmail('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save notification');
+    }
   }
 
   async function runBacktest() {
-    const data = await apiPost<Record<string, unknown>>('/api/backtest', { ticker: selected, threshold, monthly_amount: 500 });
-    setBacktest(data);
+    setError(null);
+    try {
+      const data = await apiPost<Record<string, unknown>>('/api/backtest', { ticker: selected, threshold, monthly_amount: 500 });
+      setBacktest(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to run backtest');
+    }
   }
 
   return (

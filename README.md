@@ -90,6 +90,7 @@ This repo is now Vercel-compatible as a single project:
 5. If Vercel still shows "vercel.json required to deploy projects with multiple services", make sure your latest commit containing `vercel.json` is pushed to GitHub, then click **Refresh** on the import screen.
 6. Add environment variables in Vercel Project Settings:
    - `VITE_API_BASE` should be empty or omitted in production so browser calls use same-origin `/api`.
+   - Do **not** set `DATABASE_URL=sqlite:///./market_opportunity.db` on Vercel. If a relative SQLite URL is present, the app now rewrites it to `/tmp`, but the safest demo setup is to omit `DATABASE_URL` entirely.
    - `CORS_ORIGINS` can be omitted for same-origin calls, or set to your custom domain for external API callers.
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `EMAIL_FROM` are only needed if you send real email alerts.
 7. Deploy. The frontend will be served from Vercel's CDN and API calls such as `/api/health` will run through the FastAPI service. If Vercel shows `FUNCTION_INVOCATION_FAILED`, open the deployment logs for the backend service first; the app now keeps `/api/health` independent of yfinance so that import/cold-start issues are easier to diagnose.

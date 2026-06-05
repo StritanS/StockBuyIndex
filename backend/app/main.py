@@ -18,9 +18,29 @@ from app.notifications.email_service import AlertRule, should_notify
 from app.scoring.opportunity_score import DISCLAIMER, calculate_opportunity_score
 
 IS_VERCEL = bool(os.getenv("VERCEL"))
-DEFAULT_SQLITE_URL = "sqlite:////tmp/market_opportunity.db" if IS_VERCEL else "sqlite:///./market_opportunity.db"
-DB_PATH = Path(os.getenv("DATABASE_URL", DEFAULT_SQLITE_URL).replace("sqlite:///", ""))
 DEFAULT_TICKERS = ["SPY", "QQQ", "VTI", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "SMH"]
+
+
+def resolve_sqlite_path(database_url: str | None = None, is_vercel: bool = IS_VERCEL) -> Path:
+    """Resolve the SQLite file to a writable location.
+
+    Vercel's deployment filesystem is read-only. If somebody copies
+    `.env.example` into Vercel, `DATABASE_URL=sqlite:///./market_opportunity.db`
+    would otherwise try to write beside the source code and every API route
+    would fail with FUNCTION_INVOCATION_FAILED. On Vercel, always place SQLite
+    files under `/tmp` unless the caller already explicitly chose `/tmp`.
+    """
+    raw_url = database_url or os.getenv("DATABASE_URL") or "sqlite:///./market_opportunity.db"
+    if not raw_url.startswith("sqlite:///"):
+        raise ValueError("Only sqlite:/// DATABASE_URL values are supported by the local MVP")
+    raw_path = raw_url.replace("sqlite:///", "", 1)
+    path = Path(raw_path)
+    if is_vercel and not str(path).startswith("/tmp/"):
+        return Path("/tmp") / path.name
+    return path
+
+
+DB_PATH = resolve_sqlite_path()
 
 app = FastAPI(title="Market Opportunity Index", version="0.1.0")
 app.add_middleware(
@@ -134,6 +154,37 @@ def build_ticker_payload(ticker: str) -> dict[str, Any]:
     return payload
 
 
+
+def fallback_ticker_payload(ticker: str, reason: str) -> dict[str, Any]:
+    """Return a neutral educational payload if the live provider is unavailable."""
+    symbol = ticker.upper().strip()
+    metrics = {
+        "price": None,
+        "volume": None,
+        "ma50": None,
+        "ma100": None,
+        "ma200": None,
+        "drawdown_52w": 0,
+        "return_1m": None,
+        "return_3m": None,
+        "return_6m": None,
+        "return_12m": 0,
+        "volatility": 25,
+        "rsi": 50,
+    }
+    score_payload = calculate_opportunity_score(metrics, get_macro_context())
+    score_payload["explanation"] = f"Live market data is unavailable right now ({reason}). Showing a neutral educational placeholder instead."
+    payload = {
+        "ticker": symbol,
+        "metrics": metrics,
+        "history": [],
+        "score": score_payload,
+        "provider_error": reason,
+        "disclaimer": DISCLAIMER,
+    }
+    save_score(symbol, score_payload)
+    return payload
+
 def refresh_watchlist_scores() -> None:
     with db() as conn:
         tickers = [row["ticker"] for row in conn.execute("SELECT ticker FROM watchlist")]
@@ -198,6 +249,8 @@ def ticker_detail(ticker: str) -> dict[str, Any]:
         return build_ticker_payload(ticker)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        return fallback_ticker_payload(ticker, str(exc))
 
 
 @app.get("/api/scores")
@@ -268,10 +321,13 @@ def evaluate_notification(rule: NotificationRuleRequest, current_score: float, p
 
 @app.post("/api/backtest")
 def backtest(request: BacktestRequest) -> dict[str, Any]:
-    snapshot = get_provider().get_ticker_snapshot(request.ticker, period="10y")
-    import yfinance as yf
+    try:
+        snapshot = get_provider().get_ticker_snapshot(request.ticker, period="10y")
+        import yfinance as yf
 
-    history = yf.Ticker(request.ticker.upper()).history(period="10y", auto_adjust=True)
+        history = yf.Ticker(request.ticker.upper()).history(period="10y", auto_adjust=True)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Live market data unavailable for backtest: {exc}") from exc
     if history.empty:
         raise HTTPException(status_code=404, detail="No history for backtest")
     result = run_monthly_score_backtest(history, request.threshold, request.monthly_amount)
