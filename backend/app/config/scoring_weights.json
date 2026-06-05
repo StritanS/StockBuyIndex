@@ -1,0 +1,9 @@
+{
+  "valuation_attractiveness": 0.18,
+  "recent_drawdown": 0.18,
+  "long_term_trend_quality": 0.20,
+  "macro_conditions": 0.14,
+  "volatility_risk": 0.12,
+  "earnings_growth_fundamentals": 0.12,
+  "sentiment_concentration_risk": 0.06
+}
