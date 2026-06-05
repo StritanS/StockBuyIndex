@@ -16,7 +16,7 @@ export default function ScoreExplanation({ explanation, components = [], whyNow 
         {components.map((component) => (
           <div key={component.name} className="rounded-xl bg-slate-950 p-3">
             <div className="flex justify-between gap-4">
-              <span className="font-semibold capitalize">{component.name.replaceAll('_', ' ')}</span>
+              <span className="font-semibold capitalize">{component.name.replace(/_/g, ' ')}</span>
               <span>{component.score.toFixed(1)} · {(component.weight * 100).toFixed(0)}%</span>
             </div>
             <p className="mt-1 text-sm text-slate-400">{component.explanation}</p>
