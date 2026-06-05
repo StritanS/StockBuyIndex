@@ -83,15 +83,15 @@ This repo is now Vercel-compatible as a single project:
 1. Push this repository to GitHub/GitLab/Bitbucket.
 2. In Vercel, create a new project and import the repository.
 3. Keep the repository root as the Vercel project root. Do not select `frontend/` as the root, because Vercel also needs `api/index.py` and the Python requirements.
-4. Use the committed `vercel.json` defaults:
-   - Install command: `npm --prefix frontend install`
-   - Build command: `npm --prefix frontend run build`
-   - Output directory: `frontend/dist`
-5. Add environment variables in Vercel Project Settings:
+4. Keep **Application Preset = Services**. The committed `vercel.json` defines two services with `experimentalServices`:
+   - `frontend`: Vite app mounted at `/` from `frontend/`
+   - `backend`: FastAPI app mounted at `/api` from `api/index.py`
+5. If Vercel still shows "vercel.json required to deploy projects with multiple services", make sure your latest commit containing `vercel.json` is pushed to GitHub, then click **Refresh** on the import screen.
+6. Add environment variables in Vercel Project Settings:
    - `VITE_API_BASE` should be empty or omitted in production so browser calls use same-origin `/api`.
    - `CORS_ORIGINS` can be omitted for same-origin calls, or set to your custom domain for external API callers.
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `EMAIL_FROM` are only needed if you send real email alerts.
-6. Deploy. The frontend will be served from Vercel's CDN and API calls such as `/api/health` will run through the FastAPI serverless function.
+7. Deploy. The frontend will be served from Vercel's CDN and API calls such as `/api/health` will run through the FastAPI service.
 
 ### Important Vercel storage note
 
@@ -108,7 +108,7 @@ npm --prefix frontend install
 vercel dev
 ```
 
-For classic local development without Vercel, continue using `uvicorn app.main:app` in `backend/` and set `VITE_API_BASE=http://localhost:8000` for the frontend.
+For classic local development without Vercel, continue using `uvicorn app.main:app` in `backend/` and set `VITE_API_BASE=http://localhost:8000` for the frontend. For Vercel Services local development, use `vercel dev -L`.
 
 ## Scoring Weights
 
